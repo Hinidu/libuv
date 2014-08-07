@@ -721,74 +721,44 @@ void fs__mkdir(uv_fs_t* req) {
 }
 
 
-/* Some parts of the implementation were borrowed from glibc. */
+/* OpenBSD original: lib/libc/stdio/mktemp.c */
 void fs__mkdtemp(uv_fs_t* req) {
-  static const WCHAR letters[] =
+  static const WCHAR *tempchars =
     L"abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789";
+  static const size_t num_chars = 62;
+  static const size_t num_x = 6;
+  WCHAR *cp, *ep;
+  unsigned int tries, i;
   size_t len;
-  WCHAR* template_part;
-  static uint64_t value;
-  unsigned int count;
-  int fd;
-
-  /* A lower bound on the number of temporary files to attempt to
-     generate. The maximum total number of temporary file names that
-     can exist for a given template is 62**6. It should never be
-     necessary to try all these combinations. Instead if a reasonable
-     number of names is tried (we define reasonable as 62**3) fail to
-     give the system administrator the chance to remove the problems. */
-#define ATTEMPTS_MIN (62 * 62 * 62)
-
-  /* The number of times to attempt to generate a temporary file. To
-     conform to POSIX, this must be no smaller than TMP_MAX. */
-#if ATTEMPTS_MIN < TMP_MAX
-  unsigned int attempts = TMP_MAX;
-#else
-  unsigned int attempts = ATTEMPTS_MIN;
-#endif
+  uint64_t v;
 
   len = wcslen(req->pathw);
-  if (len < 6 || wcsncmp(&req->pathw[len - 6], L"XXXXXX", 6)) {
+  ep = req->pathw + len;
+  if (len < num_x || wcsncmp(ep - num_x, L"XXXXXX", num_x)) {
     SET_REQ_UV_ERROR(req, UV_EINVAL, ERROR_INVALID_PARAMETER);
     return;
   }
 
-  /* This is where the Xs start. */
-  template_part = &req->pathw[len - 6];
+  tries = TMP_MAX;
+  do {
+    v = (((uint64_t) rand()) << 30) | (rand() << 15) | rand();
+    cp = ep - num_x;
+    for (i = 0; i < num_x; i++) {
+      *cp++ = tempchars[v % num_chars];
+      v /= num_chars;
+    }
 
-  /* Get some random data. */
-  value += uv_hrtime() ^ _getpid();
-
-  for (count = 0; count < attempts; value += 7777, ++count) {
-    uint64_t v = value;
-
-    /* Fill in the random bits. */
-    template_part[0] = letters[v % 62];
-    v /= 62;
-    template_part[1] = letters[v % 62];
-    v /= 62;
-    template_part[2] = letters[v % 62];
-    v /= 62;
-    template_part[3] = letters[v % 62];
-    v /= 62;
-    template_part[4] = letters[v % 62];
-    v /= 62;
-    template_part[5] = letters[v % 62];
-
-    fd = _wmkdir(req->pathw);
-
-    if (fd >= 0) {
+    if (_wmkdir(req->pathw) == 0) {
       len = strlen(req->path);
-      wcstombs((char*) req->path + len - 6, template_part, 6);
+      wcstombs((char*) req->path + len - num_x, ep - num_x, num_x);
       SET_REQ_RESULT(req, 0);
       return;
     } else if (errno != EEXIST) {
       SET_REQ_RESULT(req, -1);
       return;
     }
-  }
+  } while (--tries);
 
-  /* We got out of the loop because we ran out of combinations to try. */
   SET_REQ_RESULT(req, -1);
 }
 
