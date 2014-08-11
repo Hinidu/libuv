@@ -730,7 +730,9 @@ void fs__mkdtemp(uv_fs_t* req) {
   WCHAR *cp, *ep;
   unsigned int tries, i;
   size_t len;
+  HCRYPTPROV h_crypt_prov;
   uint64_t v;
+  BOOL released;
 
   len = wcslen(req->pathw);
   ep = req->pathw + len;
@@ -739,9 +741,19 @@ void fs__mkdtemp(uv_fs_t* req) {
     return;
   }
 
+  if (!CryptAcquireContext(&h_crypt_prov, NULL, NULL, PROV_RSA_FULL,
+                           CRYPT_VERIFYCONTEXT)) {
+    SET_REQ_WIN32_ERROR(req, GetLastError());
+    return;
+  }
+
   tries = TMP_MAX;
   do {
-    v = (((uint64_t) rand()) << 30) | (rand() << 15) | rand();
+    if (!CryptGenRandom(h_crypt_prov, sizeof(v), (BYTE*) &v)) {
+      SET_REQ_WIN32_ERROR(req, GetLastError());
+      break;
+    }
+
     cp = ep - num_x;
     for (i = 0; i < num_x; i++) {
       *cp++ = tempchars[v % num_chars];
@@ -752,14 +764,18 @@ void fs__mkdtemp(uv_fs_t* req) {
       len = strlen(req->path);
       wcstombs((char*) req->path + len - num_x, ep - num_x, num_x);
       SET_REQ_RESULT(req, 0);
-      return;
+      break;
     } else if (errno != EEXIST) {
       SET_REQ_RESULT(req, -1);
-      return;
+      break;
     }
   } while (--tries);
 
-  SET_REQ_RESULT(req, -1);
+  released = CryptReleaseContext(h_crypt_prov, 0);
+  assert(released);
+  if (tries == 0) {
+    SET_REQ_RESULT(req, -1);
+  }
 }
 
 

@@ -1897,8 +1897,6 @@ UV_EXTERN int uv_fs_mkdir(uv_loop_t* loop, uv_fs_t* req, const char* path,
  * characters of tpl must be XXXXXX and these are replaced with a string that
  * makes the directory name unique. On success the name of created directory
  * will be stored in req->path.
- * You should ensure that srand() has been called before using this function
- * on Windows.
  */
 UV_EXTERN int uv_fs_mkdtemp(uv_loop_t* loop, uv_fs_t* req, const char* tpl,
     uv_fs_cb cb);
